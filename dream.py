@@ -4,6 +4,7 @@
 import numpy as np
 import scipy
 import PIL.Image
+import os
 
 import tensorflow as tf
 from tensorflow import keras
@@ -16,37 +17,105 @@ sess = tf.InteractiveSession()
 with tf.Session() as sess:
          sess.run(tf.global_variables_initializer())
 
+######## The following code is based on the keras documentation opposite
+#aimed at making my life easier and creating my retrained inception model without raw tensorflow
+from keras.applications.inception_v3 import InceptionV3
+from keras.preprocessing import image
+from keras.models import Model
+from keras import Sequential
+from keras.layers import Dense, GlobalAveragePooling2D
+from keras.preprocessing.image import ImageDataGenerator
+#constant vars
+NUM_CLASSES = 5
+batchsize = 32
+EPOCHS = 10
+#from keras import backend as K
 
+# create the base pre-trained model
+base_model = InceptionV3(weights='imagenet', include_top=False)
 
-#importing graphDef to get weights, use .pb file
-def create_graph(modelFullPath):
-    """Creates a graph from saved GraphDef file and returns a saver."""
-    # Creates graph from saved graph_def.pb.
-    with tf.gfile.FastGFile(modelFullPath, 'rb') as f:
-        graph_def = tf.GraphDef()
-        graph_def.ParseFromString(f.read())
-        tf.import_graph_def(graph_def, name='')
+# add a global spatial average pooling layer
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+# let's add a fully-connected layer
+x = Dense(1024, activation='relu')(x)
+# and a logistic layer -- let's say we have 200 classes
+predictions = Dense(NUM_CLASSES, activation='softmax')(x) #had to make sure the number of classes matched up. fuckin keras doc hard coded 200 classes
 
-GRAPH_DIR = 'resources/output.pb'
-create_graph(GRAPH_DIR)
+# this is the model we will train
+model = Model(inputs=base_model.input, outputs=predictions)
 
-constant_values = {}
+# first: train only the top layers (which were randomly initialized)
+# i.e. freeze all convolutional InceptionV3 layers
+for layer in base_model.layers:
+    layer.trainable = False
 
-with tf.Session() as sess:
-  constant_ops = [op for op in sess.graph.get_operations() if op.type == "Const"]
-  for constant_op in constant_ops:
-    constant_values[constant_op.name] = sess.run(constant_op.outputs[0])
+# compile the model (should be done *after* setting layers to non-trainable)
+model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
 
+data_aug = ImageDataGenerator(rotation_range=20, zoom_range=0.15,
+	width_shift_range=0.2, height_shift_range=0.2, shear_range=0.15,
+	horizontal_flip=True, fill_mode="nearest")
 
-with tf.Session() as sess:
-    all_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
-    print (len(all_vars))
+# train the model on the new data for a few epochs
+#data generators
+train_gen = data_aug.flow_from_directory(directory = 'resources/dataset/train',
+                                        target_size = (255, 255), color_mode='rgb',
+                                        batch_size=batchsize, class_mode='categorical',
+                                        shuffle='True', seed=420) #its important that the seed is an int and not a string lol
+val_gen = data_aug.flow_from_directory(directory = 'resources/dataset/validate',
+                                        target_size = (255, 255), color_mode='rgb',
+                                        batch_size=batchsize, class_mode='categorical',
+                                        shuffle='True', seed=420)
+print("data generators loaded.")
+
+STEP_SIZE_TRAIN=train_gen.n//train_gen.batch_size
+STEP_SIZE_VALID=val_gen.n//val_gen.batch_size
+
+model.fit_generator(generator=train_gen,
+                    steps_per_epoch=STEP_SIZE_TRAIN,
+                    validation_data=val_gen,
+                    validation_steps=STEP_SIZE_VALID,
+                    epochs=EPOCHS)
+# at this point, the top layers are well trained and we can start fine-tuning
+# convolutional layers from inception V3. We will freeze the bottom N layers
+# and train the remaining top layers.
+
+# let's visualize layer names and layer indices to see how many layers
+# we should freeze:
+for i, layer in enumerate(base_model.layers):
+   print(i, layer.name)
+
+# we chose to train the top 2 inception blocks, i.e. we will freeze
+# the first 249 layers and unfreeze the rest:
+for layer in model.layers[:249]:
+   layer.trainable = False
+for layer in model.layers[249:]:
+   layer.trainable = True
+
+# we need to recompile the model for these modifications to take effect
+# we use SGD with a low learning rate
+from keras.optimizers import SGD
+model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy')
+
+# we train our model again (this time fine-tuning the top 2 inception blocks
+# alongside the top Dense layers
+model.fit_generator(generator=train_gen,
+                    steps_per_epoch=STEP_SIZE_TRAIN,
+                    validation_data=val_gen,
+                    validation_steps=STEP_SIZE_VALID,
+                    epochs=EPOCHS)
+
+print("finished generator successfully")
+########end
+
 
 # Disable all training specific operations
 K.set_learning_phase(0)
 
 # The model will be loaded with pre-trained inceptionv3 weights.
-model = inception_v3.InceptionV3(weights='resources/output_model.h5', include_top=False)
+#JK WE USIN MY BRAND NEW SHARK TRAINED MODEL
+#model = inception_v3.InceptionV3(weights='resources/output_model.h5', include_top=False)
 dream = model.input
 print('Model loaded.')
 
