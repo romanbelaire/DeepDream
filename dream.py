@@ -5,18 +5,31 @@ import numpy as np
 import scipy
 import PIL.Image
 import os
-
+import h5py
+import argparse
 import tensorflow as tf
 from tensorflow import keras
 from keras.preprocessing.image import load_img, save_img, img_to_array
 from keras.applications import inception_v3
 from keras import backend as K
 
+#argument parser
+#parser = argparse.ArgumentParser()
+#parser.add_argument("-r", "--retrain", help="Retrain the model.", action="store_true")
+#parser.add_argument("-d", "--dataset_directory", help="Directory containing dataset. Should be sorted into [directory]/train, [directory]/validate, [directory]/test.",
+#                    default="resources/dataset/")
+
+
 # To fix FailedPreconditionError:
 sess = tf.InteractiveSession()
+#show connected devices:
+sess = tf.Session(config=tf.ConfigProto(log_device_placement=True))
+
 with tf.Session() as sess:
          sess.run(tf.global_variables_initializer())
 
+print("GPUs: ")
+K.tensorflow_backend._get_available_gpus()
 ######## The following code is based on the keras documentation opposite
 #aimed at making my life easier and creating my retrained inception model without raw tensorflow
 from keras.applications.inception_v3 import InceptionV3
@@ -25,89 +38,105 @@ from keras.models import Model
 from keras import Sequential
 from keras.layers import Dense, GlobalAveragePooling2D
 from keras.preprocessing.image import ImageDataGenerator
+from keras.models import load_model
+
 #constant vars
 NUM_CLASSES = 5
 batchsize = 32
-EPOCHS = 10
+EPOCHS = 60
 #from keras import backend as K
 
+def retrain_model():
 # create the base pre-trained model
-base_model = InceptionV3(weights='imagenet', include_top=False)
+    base_model = InceptionV3(weights='imagenet', include_top=False)
 
-# add a global spatial average pooling layer
-x = base_model.output
-x = GlobalAveragePooling2D()(x)
-# let's add a fully-connected layer
-x = Dense(1024, activation='relu')(x)
-# and a logistic layer -- let's say we have 200 classes
-predictions = Dense(NUM_CLASSES, activation='softmax')(x) #had to make sure the number of classes matched up. fuckin keras doc hard coded 200 classes
+    # add a global spatial average pooling layer
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    # let's add a fully-connected layer
+    x = Dense(1024, activation='relu')(x)
+    # and a logistic layer -- let's say we have 200 classes
+    predictions = Dense(NUM_CLASSES, activation='softmax')(x) #had to make sure the number of classes matched up. fuckin keras doc hard-coded 200 classes
 
-# this is the model we will train
-model = Model(inputs=base_model.input, outputs=predictions)
+    # this is the model we will train
+    model = Model(inputs=base_model.input, outputs=predictions)
 
-# first: train only the top layers (which were randomly initialized)
-# i.e. freeze all convolutional InceptionV3 layers
-for layer in base_model.layers:
-    layer.trainable = False
+    # first: train only the top layers (which were randomly initialized)
+    # i.e. freeze all convolutional InceptionV3 layers
+    for layer in base_model.layers:
+        layer.trainable = False
 
-# compile the model (should be done *after* setting layers to non-trainable)
-model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
+    # compile the model (should be done *after* setting layers to non-trainable)
+    model.compile(optimizer='rmsprop', loss='categorical_crossentropy')
 
-data_aug = ImageDataGenerator(rotation_range=20, zoom_range=0.15,
-	width_shift_range=0.2, height_shift_range=0.2, shear_range=0.15,
-	horizontal_flip=True, fill_mode="nearest")
+    data_aug = ImageDataGenerator(rotation_range=20, zoom_range=0.15,
+    	width_shift_range=0.2, height_shift_range=0.2, shear_range=0.15,
+    	horizontal_flip=True, fill_mode="nearest")
 
-# train the model on the new data for a few epochs
-#data generators
-train_gen = data_aug.flow_from_directory(directory = 'resources/dataset/train',
-                                        target_size = (255, 255), color_mode='rgb',
-                                        batch_size=batchsize, class_mode='categorical',
-                                        shuffle='True', seed=420) #its important that the seed is an int and not a string lol
-val_gen = data_aug.flow_from_directory(directory = 'resources/dataset/validate',
-                                        target_size = (255, 255), color_mode='rgb',
-                                        batch_size=batchsize, class_mode='categorical',
-                                        shuffle='True', seed=420)
-print("data generators loaded.")
+    # train the model on the new data for a few epochs
+    #data generators
+    train_gen = data_aug.flow_from_directory(directory = 'resources/dataset/train',
+                                            target_size = (255, 255), color_mode='rgb',
+                                            batch_size=batchsize, class_mode='categorical',
+                                            shuffle='True', seed=420) #its important that the seed is an int and not a string lol
+    val_gen = data_aug.flow_from_directory(directory = 'resources/dataset/validate',
+                                            target_size = (255, 255), color_mode='rgb',
+                                            batch_size=batchsize, class_mode='categorical',
+                                            shuffle='True', seed=69)
+    print("data generators loaded.")
 
-STEP_SIZE_TRAIN=train_gen.n//train_gen.batch_size
-STEP_SIZE_VALID=val_gen.n//val_gen.batch_size
+    STEP_SIZE_TRAIN=train_gen.n//train_gen.batch_size
+    STEP_SIZE_VALID=val_gen.n//val_gen.batch_size
 
-model.fit_generator(generator=train_gen,
-                    steps_per_epoch=STEP_SIZE_TRAIN,
-                    validation_data=val_gen,
-                    validation_steps=STEP_SIZE_VALID,
-                    epochs=EPOCHS)
-# at this point, the top layers are well trained and we can start fine-tuning
-# convolutional layers from inception V3. We will freeze the bottom N layers
-# and train the remaining top layers.
+    model.fit_generator(generator=train_gen,
+                        steps_per_epoch=STEP_SIZE_TRAIN,
+                        validation_data=val_gen,
+                        validation_steps=STEP_SIZE_VALID,
+                        epochs=EPOCHS)
+    # at this point, the top layers are well trained and we can start fine-tuning
+    # convolutional layers from inception V3. We will freeze the bottom N layers
+    # and train the remaining top layers.
 
-# let's visualize layer names and layer indices to see how many layers
-# we should freeze:
-for i, layer in enumerate(base_model.layers):
-   print(i, layer.name)
+    # let's visualize layer names and layer indices to see how many layers
+    # we should freeze:
+    for i, layer in enumerate(base_model.layers):
+       print(i, layer.name)
 
-# we chose to train the top 2 inception blocks, i.e. we will freeze
-# the first 249 layers and unfreeze the rest:
-for layer in model.layers[:249]:
-   layer.trainable = False
-for layer in model.layers[249:]:
-   layer.trainable = True
+    # we chose to train the top 2 inception blocks, i.e. we will freeze
+    # the first 249 layers and unfreeze the rest:
+    for layer in model.layers[:249]:
+       layer.trainable = False
+    for layer in model.layers[249:]:
+       layer.trainable = True
 
-# we need to recompile the model for these modifications to take effect
-# we use SGD with a low learning rate
-from keras.optimizers import SGD
-model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy')
+    # we need to recompile the model for these modifications to take effect
+    # we use SGD with a low learning rate
+    from keras.optimizers import SGD
+    model.compile(optimizer=SGD(lr=0.0001, momentum=0.9), loss='categorical_crossentropy')
 
-# we train our model again (this time fine-tuning the top 2 inception blocks
-# alongside the top Dense layers
-model.fit_generator(generator=train_gen,
-                    steps_per_epoch=STEP_SIZE_TRAIN,
-                    validation_data=val_gen,
-                    validation_steps=STEP_SIZE_VALID,
-                    epochs=EPOCHS)
+    # we train our model again (this time fine-tuning the top 2 inception blocks
+    # alongside the top Dense layers
+    model.fit_generator(generator=train_gen,
+                        steps_per_epoch=STEP_SIZE_TRAIN,
+                        validation_data=val_gen,
+                        validation_steps=STEP_SIZE_VALID,
+                        epochs=EPOCHS)
 
-print("finished generator successfully")
-########end
+    print("finished generator successfully")
+    #save our stuff
+    model_json = model.to_json()
+    with open("resources/saved_models/model1/model.json", "w") as json_file:
+        json_file.write(model_json)
+    model.save_weights("resources/saved_models/model1/model_weights.h5")
+    print("weights saved.")
+
+    model.save("resources/saved_models/model1/full_model.h5")
+    print("full model saved")
+    ########end
+
+
+def load_full_model(path):
+    return load_model(path)
 
 
 # Disable all training specific operations
@@ -116,6 +145,7 @@ K.set_learning_phase(0)
 # The model will be loaded with pre-trained inceptionv3 weights.
 #JK WE USIN MY BRAND NEW SHARK TRAINED MODEL
 #model = inception_v3.InceptionV3(weights='resources/output_model.h5', include_top=False)
+model = load_full_model("resources/saved_models/model1/full_model.h5")
 dream = model.input
 print('Model loaded.')
 
@@ -123,10 +153,10 @@ print('Model loaded.')
 # You can tweak these setting to obtain new visual effects.
 settings = {
     'features': {
-        'mixed2': 0.2, #wavy layers
+        'mixed2': 2, #wavy layers
         'mixed3': 1.5, #smooth circles
-        'mixed4': 0.2,  #kind of jagged
-        'mixed5': 5,    #wrinkle/fur texture
+        'mixed4': 6,  #kind of jagged
+        'mixed5': 0.5,    #wrinkle/fur texture
     },
 }
 
@@ -229,7 +259,8 @@ octave_scale = 1.4  # Size ratio between scales
 iterations = 20  # Number of ascent steps per scale
 max_loss = 10.
 
-base_image_path = "resources/images/tatt.png"
+base_image_path = "resources/images/ducks_0.jpg"
+print('opening ' + base_image_path)
 img = PIL.Image.open(base_image_path)
 img
 
@@ -261,6 +292,6 @@ for shape in successive_shapes:
     shrunk_original_img = resize_img(original_img, shape)
 
 save_img('dream.jpg',deprocess_image(np.copy(img)))
-
+print('saved dream')
 dreamout = PIL.Image.open('dream.jpg')
 dreamout
