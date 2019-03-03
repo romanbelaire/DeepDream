@@ -41,9 +41,9 @@ from keras.preprocessing.image import ImageDataGenerator
 from keras.models import load_model
 
 #constant vars
-NUM_CLASSES = 5
+NUM_CLASSES = 9
 batchsize = 32
-EPOCHS = 60
+EPOCHS = 500
 #from keras import backend as K
 
 def retrain_model():
@@ -132,6 +132,8 @@ def retrain_model():
 
     model.save("resources/saved_models/model1/full_model.h5")
     print("full model saved")
+
+    return model
     ########end
 
 
@@ -145,7 +147,8 @@ K.set_learning_phase(0)
 # The model will be loaded with pre-trained inceptionv3 weights.
 #JK WE USIN MY BRAND NEW SHARK TRAINED MODEL
 #model = inception_v3.InceptionV3(weights='resources/output_model.h5', include_top=False)
-model = load_full_model("resources/saved_models/model1/full_model.h5")
+#model = load_full_model("resources/saved_models/model1/full_model.h5")
+model = retrain_model()
 dream = model.input
 print('Model loaded.')
 
