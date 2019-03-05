@@ -41,14 +41,14 @@ from keras.preprocessing.image import ImageDataGenerator
 from keras.models import load_model
 
 #constant vars
-NUM_CLASSES = 9
+NUM_CLASSES = 6
 batchsize = 32
-EPOCHS = 500
+EPOCHS = 30
 #from keras import backend as K
 
 def retrain_model():
 # create the base pre-trained model
-    base_model = InceptionV3(weights='imagenet', include_top=False)
+    base_model = InceptionV3(weights=None, include_top=False)#weights should be None for new model, 'imagenet' for pre-trained
 
     # add a global spatial average pooling layer
     x = base_model.output
@@ -125,12 +125,12 @@ def retrain_model():
     print("finished generator successfully")
     #save our stuff
     model_json = model.to_json()
-    with open("resources/saved_models/model1/model.json", "w") as json_file:
+    with open("resources/saved_models/sea1/sea_model.json", "w") as json_file:
         json_file.write(model_json)
-    model.save_weights("resources/saved_models/model1/model_weights.h5")
+    model.save_weights("resources/saved_models/sea1/sea_model_weights.h5")
     print("weights saved.")
 
-    model.save("resources/saved_models/model1/full_model.h5")
+    model.save("resources/saved_models/sea1/sea_full_model.h5")
     print("full model saved")
 
     return model
@@ -147,8 +147,8 @@ K.set_learning_phase(0)
 # The model will be loaded with pre-trained inceptionv3 weights.
 #JK WE USIN MY BRAND NEW SHARK TRAINED MODEL
 #model = inception_v3.InceptionV3(weights='resources/output_model.h5', include_top=False)
-#model = load_full_model("resources/saved_models/model1/full_model.h5")
-model = retrain_model()
+model = load_full_model("resources/saved_models/model1/full_model.h5")
+#model = retrain_model()
 dream = model.input
 print('Model loaded.')
 
@@ -157,8 +157,8 @@ print('Model loaded.')
 settings = {
     'features': {
         'mixed2': 2, #wavy layers
-        'mixed3': 1.5, #smooth circles
-        'mixed4': 6,  #kind of jagged
+        'mixed3': 5, #smooth circles
+        'mixed4': 0.5,  #kind of jagged
         'mixed5': 0.5,    #wrinkle/fur texture
     },
 }
@@ -262,7 +262,7 @@ octave_scale = 1.4  # Size ratio between scales
 iterations = 20  # Number of ascent steps per scale
 max_loss = 10.
 
-base_image_path = "resources/images/ducks_0.jpg"
+base_image_path = "resources/images/tatt.png"
 print('opening ' + base_image_path)
 img = PIL.Image.open(base_image_path)
 img
