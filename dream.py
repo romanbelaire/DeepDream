@@ -30,7 +30,7 @@ with tf.Session() as sess:
 
 print("GPUs: ")
 K.tensorflow_backend._get_available_gpus()
-######## The following code is based on the keras documentation opposite
+######## The following code is based on the keras documentation site
 #aimed at making my life easier and creating my retrained inception model without raw tensorflow
 from keras.applications.inception_v3 import InceptionV3
 from keras.preprocessing import image
@@ -156,10 +156,10 @@ print('Model loaded.')
 # You can tweak these setting to obtain new visual effects.
 settings = {
     'features': {
-        'mixed2': 2, #wavy layers
-        'mixed3': 5, #smooth circles
-        'mixed4': 0.5,  #kind of jagged
-        'mixed5': 0.5,    #wrinkle/fur texture
+        'mixed2': 3, #wavy layers
+        'mixed3': 6, #smooth circles
+        'mixed4': 2,  #kind of jagged
+        'mixed5': 1.5,    #wrinkle/fur texture
     },
 }
 
@@ -174,6 +174,11 @@ def preprocess_image(image_path):
     img = inception_v3.preprocess_input(img)
     return img
 
+def preprocess_array(arr):
+    #version of preprocess_image, except for a numpy img_to_array
+    img = np.expand_dims(arr, axis=0)
+    img = inception_v3.preprocess_input(img)
+    return img
 
 # And a function to do the opposite: convert a tensor into an image.
 def deprocess_image(x):
@@ -262,39 +267,117 @@ octave_scale = 1.4  # Size ratio between scales
 iterations = 20  # Number of ascent steps per scale
 max_loss = 10.
 
-base_image_path = "resources/images/tatt.png"
+base_image_path = "resources/images/orion.jpg"
 print('opening ' + base_image_path)
 img = PIL.Image.open(base_image_path)
-img
+#img
 
-img = preprocess_image(base_image_path)
-if K.image_data_format() == 'channels_first':
-    original_shape = img.shape[2:]
-else:
-    original_shape = img.shape[1:3]
-successive_shapes = [original_shape]
-for i in range(1, num_octave):
-    shape = tuple([int(dim / (octave_scale ** i)) for dim in original_shape])
-    successive_shapes.append(shape)
-successive_shapes = successive_shapes[::-1]
-original_img = np.copy(img)
-shrunk_original_img = resize_img(img, successive_shapes[0])
 
-for shape in successive_shapes:
-    print('Processing image shape', shape)
-    img = resize_img(img, shape)
-    img = gradient_ascent(img,
-                          iterations=iterations,
-                          step=step,
-                          max_loss=max_loss)
-    upscaled_shrunk_original_img = resize_img(shrunk_original_img, shape)
-    same_size_original = resize_img(original_img, shape)
-    lost_detail = same_size_original - upscaled_shrunk_original_img
 
-    img += lost_detail
-    shrunk_original_img = resize_img(original_img, shape)
+def dream_image(img, save):
+    img = preprocess_image(base_image_path)
+    if K.image_data_format() == 'channels_first':
+        original_shape = img.shape[2:]
+    else:
+        original_shape = img.shape[1:3]
+    successive_shapes = [original_shape]
+    for i in range(1, num_octave):
+        shape = tuple([int(dim / (octave_scale ** i)) for dim in original_shape])
+        successive_shapes.append(shape)
+    successive_shapes = successive_shapes[::-1]
+    original_img = np.copy(img)
+    shrunk_original_img = resize_img(img, successive_shapes[0])
 
-save_img('dream.jpg',deprocess_image(np.copy(img)))
-print('saved dream')
-dreamout = PIL.Image.open('dream.jpg')
-dreamout
+    for shape in successive_shapes[:4]:
+        print('Processing image shape', shape)
+        img = resize_img(img, shape)
+        img = gradient_ascent(img,
+                              iterations=iterations,
+                              step=step,
+                              max_loss=max_loss)
+        upscaled_shrunk_original_img = resize_img(shrunk_original_img, shape)
+        same_size_original = resize_img(original_img, shape)
+        lost_detail = same_size_original - upscaled_shrunk_original_img
+
+        img += lost_detail
+        shrunk_original_img = resize_img(original_img, shape)
+    if save:
+        save_img('dream.jpg',deprocess_image(np.copy(img)))
+        print('saved dream')
+        dreamout = PIL.Image.open('dream.jpg')
+    return deprocess_image(np.copy(img))
+        #dreamout
+
+#dream_image(img, True)
+
+def dream_video(frames):
+    new_frames = []
+    for i, frame in enumerate(frames):
+        print('PROCESSING FRAME ' + str(i) + " of " + str(len(frames)))
+        if i > 0:
+            print("averaging two frames")
+            frame = (np.array(frames[i-1]) + np.array(frame))/2.0
+
+        frame = preprocess_array(frame)
+        if K.image_data_format() == 'channels_first':
+            original_shape = frame.shape[2:]
+        else:
+            original_shape = frame.shape[1:3]
+        successive_shapes = [original_shape]
+        for i in range(1, num_octave):
+            shape = tuple([int(dim / (octave_scale ** i)) for dim in original_shape])
+            successive_shapes.append(shape)
+        successive_shapes = successive_shapes[::-1]
+        original_img = np.copy(frame)
+        shrunk_original_img = resize_img(frame, successive_shapes[0])
+
+        for shape in successive_shapes[:4]:
+            print('Processing image shape', shape)
+            frame = resize_img(frame, shape)
+            frame = gradient_ascent(frame,
+                                  iterations=iterations,
+                                  step=step,
+                                  max_loss=max_loss)
+            upscaled_shrunk_original_img = resize_img(shrunk_original_img, shape)
+            same_size_original = resize_img(original_img, shape)
+            lost_detail = same_size_original - upscaled_shrunk_original_img
+
+            frame += lost_detail
+            shrunk_original_img = resize_img(original_img, shape)
+        new_frames.append(deprocess_image(np.copy(frame)))
+    return new_frames
+
+def dream_video_from_image(img, num_frames):
+    new_frames = []
+    new_frames.append(img)
+    for i in range(0, num_frames):
+        print('frame ' + str(i))
+        frame = new_frames[i]
+        frame = preprocess_array(frame)
+        if K.image_data_format() == 'channels_first':
+            original_shape = frame.shape[2:]
+        else:
+            original_shape = frame.shape[1:3]
+        successive_shapes = [original_shape]
+        for i in range(1, num_octave):
+            shape = tuple([int(dim / (octave_scale ** i)) for dim in original_shape])
+            successive_shapes.append(shape)
+        successive_shapes = successive_shapes[::-1]
+        original_img = np.copy(frame)
+        shrunk_original_img = resize_img(frame, successive_shapes[0])
+
+        for shape in successive_shapes[:4]:
+            print('Processing image shape', shape)
+            frame = resize_img(frame, shape)
+            frame = gradient_ascent(frame,
+                                  iterations=iterations,
+                                  step=step,
+                                  max_loss=max_loss)
+            upscaled_shrunk_original_img = resize_img(shrunk_original_img, shape)
+            same_size_original = resize_img(original_img, shape)
+            lost_detail = same_size_original - upscaled_shrunk_original_img
+
+            frame += lost_detail
+            shrunk_original_img = resize_img(original_img, shape)
+        new_frames.append(deprocess_image(np.copy(frame)))
+    return np.delete(new_frames, 0)
