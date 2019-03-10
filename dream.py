@@ -184,13 +184,17 @@ def preprocess_array(arr):
 def deprocess_image(x):
     # Util function to convert a tensor into a valid image.
     if K.image_data_format() == 'channels_first':
+        print("Deprocess color first")
         x = x.reshape((3, x.shape[2], x.shape[3]))
         x = x.transpose((1, 2, 0))
     else:
         x = x.reshape((x.shape[1], x.shape[2], 3))
-    x /= 2.
-    x += 0.5
-    x *= 255.
+    np.true_divide(x, 2., x, casting='unsafe')
+    #x /= 2. #swap for line 191?
+    np.add(x, 0.5, x, casting='unsafe')
+    #x += 0.5
+    np.multiply(x, 255., x, casting='unsafe')
+    #x *= 255.
     x = np.clip(x, 0, 255).astype('uint8')
     return x
 
@@ -258,6 +262,55 @@ def gradient_ascent(x, iterations, step, max_loss=None):
         x += step * grad_values
     return x
 
+def rgb2gray(rgb):
+    return np.dot(rgb[...,:3], [0.299, 0.587, 0.114])
+
+def gray2rgb(gray):
+    gray = gray.transpose((1, 2, 0))
+    w, h, c = gray.shape
+    rgb = np.empty((w, h, 3), dtype=np.float32)
+
+    rgb[:, :, 2] = rgb[:, :, 1] = rgb[:, :, 0] = gray[:,:,0]
+    return rgb
+
+def transfer_color(dream_img, original_img):
+
+    original_image = np.clip(original_img, 0, 255)
+    styled_image = np.clip(dream_img, 0, 255)
+
+    original_image = original_image[0]
+    # Luminosity transfer steps:
+    # 1. Convert stylized RGB->grayscale accoriding to Rec.601 luma (0.299, 0.587, 0.114)
+    # 2. Convert stylized grayscale into YUV (YCbCr)
+    # 3. Convert original image into YUV (YCbCr)
+    # 4. Recombine (stylizedYUV.Y, originalYUV.U, originalYUV.V)
+    # 5. Convert recombined image from YUV back to RGB
+
+    # 1
+    styled_grayscale = rgb2gray(styled_image)
+    styled_grayscale_rgb = gray2rgb(styled_grayscale)
+
+    # 2
+    styled_grayscale_yuv = np.array(PIL.Image.fromarray(styled_grayscale_rgb.astype(np.uint8)).convert('YCbCr'))
+
+    # 3
+    original_yuv = np.array(PIL.Image.fromarray(original_image.astype(np.uint8)).convert('YCbCr'))
+
+    # 4
+    w, h, _ = original_yuv.shape
+
+    combined_yuv = np.empty((1, w, h, 3), dtype=np.uint8)
+    #print([styled_grayscale_yuv].shape)
+    combined_yuv[0, ..., 0] = styled_grayscale_yuv[..., 0]
+    combined_yuv[0, ..., 1] = original_yuv[..., 1]
+    combined_yuv[0, ..., 2] = original_yuv[..., 2]
+
+    # 5
+    print("cy" + str(combined_yuv.shape))
+    img_out = np.array(PIL.Image.fromarray(combined_yuv[0], 'YCbCr').convert('RGB'))
+    return [img_out]
+
+
 
 # Set hyperparameters. The ocatave_scale is the ratio between each successive scale (remember the upscaling mentioned before?).
 # Playing with these hyperparameters will also allow you to achieve new effects
@@ -288,7 +341,7 @@ def dream_image(img, save):
     original_img = np.copy(img)
     shrunk_original_img = resize_img(img, successive_shapes[0])
 
-    for shape in successive_shapes[:4]:
+    for shape in successive_shapes[:4]: #remove the indexing to have full resolution
         print('Processing image shape', shape)
         img = resize_img(img, shape)
         img = gradient_ascent(img,
@@ -311,8 +364,11 @@ def dream_image(img, save):
 #dream_image(img, True)
 
 def dream_video(frames):
+    downsampling = 1 #how many resolution ratios down to go
+    preserve_color = True
     new_frames = []
     for i, frame in enumerate(frames):
+        original_frame = frame
         print('PROCESSING FRAME ' + str(i) + " of " + str(len(frames)))
         if i > 0:
             print("averaging two frames")
@@ -328,11 +384,13 @@ def dream_video(frames):
             shape = tuple([int(dim / (octave_scale ** i)) for dim in original_shape])
             successive_shapes.append(shape)
         successive_shapes = successive_shapes[::-1]
+        max_size = len(successive_shapes) - downsampling
         original_img = np.copy(frame)
         shrunk_original_img = resize_img(frame, successive_shapes[0])
 
-        for shape in successive_shapes[:4]:
+        for shape in successive_shapes[:max_size]:
             print('Processing image shape', shape)
+            print(frame.shape)
             frame = resize_img(frame, shape)
             frame = gradient_ascent(frame,
                                   iterations=iterations,
@@ -344,8 +402,16 @@ def dream_video(frames):
 
             frame += lost_detail
             shrunk_original_img = resize_img(original_img, shape)
+
+        if preserve_color:
+            #following two lines for weird colors
+            frame = transfer_color(frame, resize_img([original_frame], frame[0,...,0].shape))
+            #frame = frame.transpose(2, 0, 1)
+            #frame = [frame]
+        print(frame.shape)
         new_frames.append(deprocess_image(np.copy(frame)))
     return new_frames
+
 
 def dream_video_from_image(img, num_frames):
     new_frames = []
